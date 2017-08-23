@@ -16,7 +16,15 @@
 
         #pragma surface surf Standard vertex:vert addshadow
         #pragma instancing_options procedural:setup
-        #pragma target 4.0
+        #pragma target 3.5
+
+        #if SHADER_TARGET >= 35 && (defined(SHADER_API_D3D11) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_XBOXONE) || defined(SHADER_API_PSSL) || defined(SHADER_API_SWITCH) || defined(SHADER_API_VULKAN) || (defined(SHADER_API_METAL) && defined(UNITY_COMPILER_HLSLCC)))
+            #define SUPPORT_STRUCTUREDBUFFER
+        #endif
+
+        #if defined(UNITY_PROCEDURAL_INSTANCING_ENABLED) && defined(SUPPORT_STRUCTUREDBUFFER)
+            #define ENABLE_INSTANCING
+        #endif
 
         struct appdata
         {
@@ -41,7 +49,8 @@
         float4x4 _LocalToWorld;
         float4x4 _WorldToLocal;
 
-        #ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
+
+        #if defined(ENABLE_INSTANCING)
 
         StructuredBuffer<float4> _PositionBuffer;
         StructuredBuffer<float4> _NormalBuffer;
@@ -50,7 +59,7 @@
 
         void vert(inout appdata v)
         {
-            #ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
+            #if defined(ENABLE_INSTANCING)
 
             uint id = unity_InstanceID * 3 + v.vid;
 
