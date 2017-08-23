@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 
+[ExecuteInEditMode]
 public class NoiseBall2 : MonoBehaviour
 {
     #region Exposed attributes
@@ -46,28 +47,31 @@ public class NoiseBall2 : MonoBehaviour
         set { _noiseMotion = value; }
     }
 
-    [SerializeField] Material _material;
+    [SerializeField, ColorUsage(false)] Color _color = Color.white;
 
-    public Material material {
-        get { return _material; }
+    public Color color {
+        get { return _color; }
+        set { _color = value; }
     }
+
+    [SerializeField] int _randomSeed = 0;
 
     #endregion
 
     #region Hidden attributes
 
     [SerializeField, HideInInspector] ComputeShader _compute;
+    [SerializeField, HideInInspector] Shader _shader;
 
     #endregion
 
     #region Private fields
 
-    Mesh _mesh;
     ComputeBuffer _drawArgsBuffer;
     ComputeBuffer _positionBuffer;
     ComputeBuffer _normalBuffer;
-    MaterialPropertyBlock _props;
-    Vector3 _noiseOffset;
+    Material _material;
+    float _localTime;
 
     #endregion
 
@@ -88,39 +92,36 @@ public class NoiseBall2 : MonoBehaviour
         _noiseFrequency = Mathf.Max(0, _noiseFrequency);
     }
 
-    void Start()
+    void OnDisable()
     {
-        // Mesh with single triangle.
-        _mesh = new Mesh();
-        _mesh.vertices = new Vector3 [3];
-        _mesh.SetIndices(new [] {0, 1, 2}, MeshTopology.Triangles, 0);
-        _mesh.UploadMeshData(true);
+        if (_positionBuffer != null)
+        {
+            _positionBuffer.Release();
+            _positionBuffer = null;
+        }
 
-        // Allocate the indirect draw args buffer.
-        _drawArgsBuffer = new ComputeBuffer(
-            1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments
-        );
-
-        // This property block is used only for avoiding a bug (issue #913828)
-        _props = new MaterialPropertyBlock();
-        _props.SetFloat("_UniqueID", Random.value);
-
-        // Clone the given material before using.
-        _material = new Material(_material);
-        _material.name += " (cloned)";
+        if (_normalBuffer != null)
+        {
+            _normalBuffer.Release();
+            _normalBuffer = null;
+        }
     }
 
     void OnDestroy()
     {
-        Destroy(_mesh);
-        _drawArgsBuffer.Release();
-        if (_positionBuffer != null) _positionBuffer.Release();
-        if (_normalBuffer != null) _normalBuffer.Release();
-        Destroy(_material);
+        if (_material != null)
+        {
+            if (Application.isPlaying)
+                Destroy(_material);
+            else
+                DestroyImmediate(_material);
+        }
     }
 
-    void Update()
+    void OnRenderObject()
     {
+        var time = _localTime + _randomSeed * 89.27345f;
+
         // Allocate/Reallocate the compute buffers when it hasn't been
         // initialized or the triangle count was changed from the last frame.
         if (_positionBuffer == null || _positionBuffer.count != TriangleCount * 3)
@@ -130,39 +131,40 @@ public class NoiseBall2 : MonoBehaviour
 
             _positionBuffer = new ComputeBuffer(TriangleCount * 3, 16);
             _normalBuffer = new ComputeBuffer(TriangleCount * 3, 16);
-
-            _drawArgsBuffer.SetData(new uint[5] {3, (uint)TriangleCount, 0, 0, 0});
         }
 
         // Invoke the update compute kernel.
         var kernel = _compute.FindKernel("Update");
 
-        _compute.SetFloat("Time", Time.time * _shuffleSpeed);
+        _compute.SetFloat("Time", _shuffleSpeed * time);
         _compute.SetFloat("Extent", _triangleExtent);
         _compute.SetFloat("NoiseAmplitude", _noiseAmplitude);
         _compute.SetFloat("NoiseFrequency", _noiseFrequency);
-        _compute.SetVector("NoiseOffset", _noiseOffset);
+        _compute.SetVector("NoiseOffset", _noiseMotion * time);
 
         _compute.SetBuffer(kernel, "PositionBuffer", _positionBuffer);
         _compute.SetBuffer(kernel, "NormalBuffer", _normalBuffer);
 
         _compute.Dispatch(kernel, ThreadGroupCount, 1, 1);
 
-        // Draw the mesh with instancing.
-        _material.SetMatrix("_LocalToWorld", transform.localToWorldMatrix);
-        _material.SetMatrix("_WorldToLocal", transform.worldToLocalMatrix);
+        if (_material == null)
+        {
+            _material = new Material(_shader);
+            _material.hideFlags = HideFlags.DontSave;
+        }
 
+        _material.SetColor("_Color", _color);
+        _material.SetMatrix("_LocalToWorld", transform.localToWorldMatrix);
         _material.SetBuffer("_PositionBuffer", _positionBuffer);
         _material.SetBuffer("_NormalBuffer", _normalBuffer);
 
-        Graphics.DrawMeshInstancedIndirect(
-            _mesh, 0, _material,
-            new Bounds(transform.position, transform.lossyScale * 5),
-            _drawArgsBuffer, 0, _props
-        );
+        _material.SetPass(0);
+        Graphics.DrawProcedural(MeshTopology.Triangles, TriangleCount * 3);
+    }
 
-        // Move the noise field.
-        _noiseOffset += _noiseMotion * Time.deltaTime;
+    void Update()
+    {
+        if (Application.isPlaying) _localTime += Time.deltaTime;
     }
 
     #endregion
